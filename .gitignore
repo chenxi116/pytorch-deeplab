@@ -1,0 +1,6 @@
+data/*.prototxt
+data/*.caffemodel
+data/*.binaryproto
+*.pyc
+*.pth
+*.png
