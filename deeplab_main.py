@@ -7,46 +7,114 @@ import numpy as np
 import torchvision
 from torchvision import datasets, models, transforms
 import matplotlib.pyplot as plt
-import time
-import copy
 import os
 import sys
 import deeplab
 from PIL import Image
+import math
 
 os.environ['CUDA_VISIBLE_DEVICES'] = sys.argv[1]
 
+class AverageMeter(object):
+    """Computes and stores the average and current value"""
+    def __init__(self):
+        self.reset()
+
+    def reset(self):
+        self.val = 0
+        self.avg = 0
+        self.sum = 0
+        self.count = 0
+
+    def update(self, val, n=1):
+        self.val = val
+        self.sum += val * n
+        self.count += n
+        self.avg = self.sum / self.count
+
 if __name__ == "__main__":
     use_gpu = torch.cuda.is_available()
-    data_transforms = {
-        'train': transforms.Compose([
-            transforms.RandomSizedCrop(321),
-            transforms.ToTensor(),
-            transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
-        ]),
-        'val': transforms.Compose([
+    data_transforms = transforms.Compose([
             transforms.ToTensor(),
             transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
         ])
-    }
 
-    pascal_dir = '/media/Work_HD/cxliu/datasets/VOCdevkit/VOC2012/JPEGImages/'
+    pascal_dir = '/media/Work_HD/cxliu/datasets/VOCdevkit/VOC2012/'
     list_dir = '/media/Work_HD/cxliu/projects/deeplab/list/'
-    lines = np.loadtxt(list_dir + 'val_id.txt', dtype=str)
+    model_fname = 'model/deeplab101_epoch%d.pth'
+
+    model = getattr(deeplab, 'resnet101')()
 
     if sys.argv[2] == 'train':
-        pass
+        model.train()
+        model.load_state_dict(torch.load('model/deeplab101_init.pth'))
+        if use_gpu:
+            model = model.cuda()
+        num_epochs = 2
+        base_lr = 0.00025
+        power = 0.9
+        criterion = nn.CrossEntropyLoss().cuda()
+        optimizer = optim.SGD(model.parameters(),
+            lr=base_lr, momentum=0.9, weight_decay=0.0005)
+        
+        losses = AverageMeter()
+        lines = np.loadtxt(list_dir + 'train_aug.txt', dtype=str)
+        for epoch in range(num_epochs):
+            lines = np.random.permutation(lines)
+            for i, line in enumerate(lines):
+                lr = base_lr * math.pow(1 - float(i) / (num_epochs * len(lines)), power)
+                for param_group in optimizer.param_groups:
+                    param_group['lr'] = lr
+
+                imname, labelname = line
+                im = datasets.folder.default_loader(pascal_dir + imname)
+                label = Image.open(pascal_dir + labelname)
+                inputs = data_transforms(im)
+                if use_gpu:
+                    inputs = Variable(inputs.cuda())
+                else:
+                    inputs = Variable(inputs)
+                outputs = model(inputs.unsqueeze(0))
+                w, h = outputs.size()[2], outputs.size()[3]
+                label_down = label.resize((h, w), Image.NEAREST)
+                target_down = torch.LongTensor(np.array(label_down).astype(np.int64))
+                if use_gpu:
+                    target_down = Variable(target_down.cuda())
+                else:
+                    target_down = Variable(target_down)
+
+                target_down = target_down.view(-1,)
+                mask = torch.lt(target_down, 21)
+                target_down = torch.masked_select(target_down, mask)
+                outputs = torch.masked_select(outputs, mask.repeat(21))
+                outputs = torch.t(outputs.view(21, -1))
+
+                loss = criterion(outputs, target_down)
+                losses.update(loss.data[0], 1)
+
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
+
+                print('epoch: {0}\t'
+                      'iter: {1}/{2}\t'
+                      'lr: {3:.6f}\t'
+                      'loss: {loss.val:.4f} ({loss.avg:.4f})'.format(
+                      epoch+1, i+1, len(lines), lr, loss=losses))
+
+            torch.save({'epoch': epoch+1, 'state_dict': model.state_dict()}, model_fname % (epoch+1))
+
     elif sys.argv[2] == 'eval':
-        model = getattr(deeplab, 'resnet101')()
         model.eval()
         model.load_state_dict(torch.load('model/deeplab101_trainaug.pth'))
         if use_gpu:
             model = model.cuda()
 
+        lines = np.loadtxt(list_dir + 'val_id.txt', dtype=str)
         for i, imname in enumerate(lines):
-            im = datasets.folder.default_loader(pascal_dir + imname + '.jpg')
-            w, h= np.shape(im)[0], np.shape(im)[1]
-            inputs = data_transforms['val'](im)
+            im = datasets.folder.default_loader(pascal_dir + 'JPEGImages/' + imname + '.jpg')
+            w, h = np.shape(im)[0], np.shape(im)[1]
+            inputs = data_transforms(im)
             if use_gpu:
                 inputs = Variable(inputs.cuda())
             else:
