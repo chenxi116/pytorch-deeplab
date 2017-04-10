@@ -113,11 +113,11 @@ def load_mean_bgr():
     return mean_bgr.transpose((1, 2, 0))
 
 
-def load_caffe(img_p, layers=50):
+def load_caffe(img_p, layers, caffe_fname):
     caffe.set_mode_cpu()
 
     prototxt = "data/deploy.prototxt"
-    caffemodel = "data/train_iter_20000.caffemodel"
+    caffemodel = caffe_fname # "data/train_iter_20000.caffemodel"
     net = caffe.Net(prototxt, caffemodel, caffe.TEST)
 
     net.blobs['data'].data[0] = img_p.transpose((2, 0, 1))
@@ -239,11 +239,8 @@ def parse_pth_varnames(p, pth_varname, num_layers):
     raise ValueError('unhandled var ' + pth_varname)
 
 
-def checkpoint_fn(layers):
-    return 'deeplab%d.pth' % layers
-
-def convert(img, img_p, layers):
-    caffe_model = load_caffe(img_p, layers)
+def convert(img, img_p, layers, caffe_fname, pytorch_fname):
+    caffe_model = load_caffe(img_p, layers, caffe_fname)
 
     #for i, n in enumerate(caffe_model.params):
     #    print n
@@ -300,7 +297,7 @@ def convert(img, img_p, layers):
     assert_almost_equal(caffe_model.blobs['res5c'].data, o[7])
 
     # Save the model
-    torch.save(model.state_dict(), checkpoint_fn(layers))
+    torch.save(model.state_dict(), pytorch_fname)
 
 
 def main():
@@ -308,9 +305,12 @@ def main():
     print img
     img_p = preprocess(img)
 
+    caffe_fname = sys.argv[1] # 'data/train_iter_20000.caffemodel'
+    pytorch_fname = sys.argv[2] # 'model/deeplab101.pth'
+
     for layers in [101]:
         print "CONVERT", layers
-        convert(img, img_p, layers)
+        convert(img, img_p, layers, caffe_fname, pytorch_fname)
 
 
 if __name__ == '__main__':

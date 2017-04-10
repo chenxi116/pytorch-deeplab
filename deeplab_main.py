@@ -34,24 +34,27 @@ if __name__ == "__main__":
     list_dir = '/media/Work_HD/cxliu/projects/deeplab/list/'
     lines = np.loadtxt(list_dir + 'val_id.txt', dtype=str)
 
-    model = getattr(deeplab, 'resnet101')()
-    model.eval()
-    model.load_state_dict(torch.load('deeplab101.pth'))
-    if use_gpu:
-        model = model.cuda()
-
-    for i, imname in enumerate(lines):
-        im = datasets.folder.default_loader(pascal_dir + imname + '.jpg')
-        w, h= np.shape(im)[0], np.shape(im)[1]
-        inputs = data_transforms['val'](im)
+    if sys.argv[2] == 'train':
+        pass
+    elif sys.argv[2] == 'eval':
+        model = getattr(deeplab, 'resnet101')()
+        model.eval()
+        model.load_state_dict(torch.load('model/deeplab101_trainaug.pth'))
         if use_gpu:
-            inputs = Variable(inputs.cuda())
-        else:
-            inputs = Variable(inputs)
-        outputs = model(inputs.unsqueeze(0))
-        outputs_up = nn.UpsamplingBilinear2d((w, h))(outputs)
-        _, pred = torch.max(outputs_up, 1)
-        pred = pred.data.cpu().numpy().squeeze().astype(np.uint8)
-        seg = Image.fromarray(pred)
-        seg.save('data/val/' + imname + '.png')
-        print('processing %d/%d' % (i + 1, len(lines)))
+            model = model.cuda()
+
+        for i, imname in enumerate(lines):
+            im = datasets.folder.default_loader(pascal_dir + imname + '.jpg')
+            w, h= np.shape(im)[0], np.shape(im)[1]
+            inputs = data_transforms['val'](im)
+            if use_gpu:
+                inputs = Variable(inputs.cuda())
+            else:
+                inputs = Variable(inputs)
+            outputs = model(inputs.unsqueeze(0))
+            outputs_up = nn.UpsamplingBilinear2d((w, h))(outputs)
+            _, pred = torch.max(outputs_up, 1)
+            pred = pred.data.cpu().numpy().squeeze().astype(np.uint8)
+            seg = Image.fromarray(pred)
+            seg.save('data/val/' + imname + '.png')
+            print('processing %d/%d' % (i + 1, len(lines)))
