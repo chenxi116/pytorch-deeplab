@@ -1,6 +1,7 @@
-data/*.prototxt
+data/solver*.prototxt
+data/train.prototxt
+data/test.prototxt
 data/*.caffemodel
-data/*.binaryproto
 *.pyc
 *.pth
 *.png
