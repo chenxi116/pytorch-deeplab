@@ -30,7 +30,8 @@ class AverageMeter(object):
         self.val = val
         self.sum += val * n
         self.count += n
-        self.avg = self.sum / self.count
+        # self.avg = self.sum / self.count
+        self.avg = self.avg * 0.99 + self.val * 0.01
 
 if __name__ == "__main__":
     use_gpu = torch.cuda.is_available()
@@ -46,15 +47,29 @@ if __name__ == "__main__":
     model = getattr(deeplab, 'resnet101')()
 
     if sys.argv[2] == 'train':
-        model.train()
+        model.eval() # in order to fix batchnorm
         model.load_state_dict(torch.load('model/deeplab101_init.pth'))
         if use_gpu:
             model = model.cuda()
         num_epochs = 2
-        base_lr = 0.00025
+        iter_size = 10
+        base_lr = 0.00025 / iter_size 
         power = 0.9
         criterion = nn.CrossEntropyLoss().cuda()
-        optimizer = optim.SGD(model.parameters(),
+        optimizer = optim.SGD([{'params': model.conv1.parameters()},
+            {'params': model.bn1.parameters()},
+            {'params': model.layer1.parameters()},
+            {'params': model.layer2.parameters()},
+            {'params': model.layer3.parameters()},
+            {'params': model.layer4.parameters()},
+            {'params': iter([model.fc1_voc12_c0.weight,
+                model.fc1_voc12_c1.weight,
+                model.fc1_voc12_c2.weight,
+                model.fc1_voc12_c3.weight])},
+            {'params': iter([model.fc1_voc12_c0.bias,
+                model.fc1_voc12_c1.bias,
+                model.fc1_voc12_c2.bias,
+                model.fc1_voc12_c3.bias]), 'weight_decay': 0.}],
             lr=base_lr, momentum=0.9, weight_decay=0.0005)
         
         losses = AverageMeter()
@@ -62,9 +77,11 @@ if __name__ == "__main__":
         for epoch in range(num_epochs):
             lines = np.random.permutation(lines)
             for i, line in enumerate(lines):
-                lr = base_lr * math.pow(1 - float(i) / (num_epochs * len(lines)), power)
-                for param_group in optimizer.param_groups:
-                    param_group['lr'] = lr
+                lr = base_lr * math.pow(1 - float(epoch * len(lines) + i) / (num_epochs * len(lines)), power)
+                for g in range(6):
+                    optimizer.param_groups[g]['lr'] = lr
+                optimizer.param_groups[6]['lr'] = lr * 10
+                optimizer.param_groups[7]['lr'] = lr * 20
 
                 imname, labelname = line
                 im = datasets.folder.default_loader(pascal_dir + imname)
@@ -92,9 +109,11 @@ if __name__ == "__main__":
                 loss = criterion(outputs, target_down)
                 losses.update(loss.data[0], 1)
 
-                optimizer.zero_grad()
+                if i % iter_size == 0:
+                    optimizer.zero_grad()
                 loss.backward()
-                optimizer.step()
+                if i % iter_size == iter_size - 1:
+                    optimizer.step()
 
                 print('epoch: {0}\t'
                       'iter: {1}/{2}\t'
@@ -102,11 +121,11 @@ if __name__ == "__main__":
                       'loss: {loss.val:.4f} ({loss.avg:.4f})'.format(
                       epoch+1, i+1, len(lines), lr, loss=losses))
 
-            torch.save({'epoch': epoch+1, 'state_dict': model.state_dict()}, model_fname % (epoch+1))
+            torch.save(model.state_dict(), model_fname % (epoch+1))
 
     elif sys.argv[2] == 'eval':
         model.eval()
-        model.load_state_dict(torch.load('model/deeplab101_trainaug.pth'))
+        model.load_state_dict(torch.load('model/deeplab101_epoch2.pth'))
         if use_gpu:
             model = model.cuda()
 
